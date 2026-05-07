@@ -1,6 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import "./App.css";
+
+function Card({ children, className = "" }) {
+  return <div className={`card ${className}`}>{children}</div>;
+}
+
+function CardContent({ children, className = "" }) {
+  return <div className={className}>{children}</div>;
+}
+
+function Button({ children, onClick, variant = "primary", className = "", type = "button", size, ...props }) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      className={`button ${variant === "outline" ? "outline" : "primary"} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
 
 const blankForm = {
   equipment: "",
