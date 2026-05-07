@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import "./App.css";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 const blankForm = {
   equipment: "",
@@ -74,27 +75,26 @@ const iconPaths = {
 
 function Icon({ name, size = 20, className = "" }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" width={size} height={size} className={className}
-      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d={iconPaths[name]} />
     </svg>
   );
 }
 
-function Card({ children, className = "" }) {
-  return <div className={`card ${className}`}>{children}</div>;
-}
-
-function Button({ children, onClick, variant = "primary", className = "", type = "button", ariaLabel }) {
-  return (
-    <button type={type} aria-label={ariaLabel} onClick={onClick} className={`button ${variant} ${className}`}>
-      {children}
-    </button>
-  );
-}
-
 function getSavedTasks() {
   try {
+    if (typeof window === "undefined") return starterTasks;
     const savedTasks = window.localStorage.getItem("personal-maintenance-tasks");
     const parsed = savedTasks ? JSON.parse(savedTasks) : starterTasks;
     return Array.isArray(parsed) ? parsed : starterTasks;
@@ -207,18 +207,23 @@ function rowsToTasks(rows) {
     .filter(Boolean);
 }
 
-function filterTasks(tasks, query, filter) {
+function filterTasks(tasks, query, filters) {
   return tasks.filter((task) => {
     const searchableText = `${task.equipment} ${task.title} ${task.workOrder} ${task.status}`.toLowerCase();
     const matchesQuery = searchableText.includes(query.toLowerCase());
 
-    const matchesFilter =
-      filter === "All" ||
-      (filter === "Open" && !task.complete) ||
-      (filter === "Complete" && task.complete) ||
-      task.priority === filter;
+    const matchesCompletion =
+      filters.completion === "All" ||
+      (filters.completion === "Open" && !task.complete) ||
+      (filters.completion === "Complete" && task.complete);
 
-    return matchesQuery && matchesFilter;
+    const matchesPriority =
+      filters.priority === "All" || task.priority === filters.priority;
+
+    const matchesEquipment =
+      filters.equipment === "All" || task.equipment === filters.equipment;
+
+    return matchesQuery && matchesCompletion && matchesPriority && matchesEquipment;
   });
 }
 
@@ -227,14 +232,19 @@ function runSelfTests() {
   console.assert(buildCsv([{ equipment: "A", title: "B", workOrder: "C", status: "D", priority: "High", estimatedTime: "E", notes: "F", complete: true }]).includes('"Yes"'), "CSV should export completed tasks as Yes.");
   console.assert(parseCsv('"Equipment","Task"\n"Stacker 47","Repair, inspect"')[1][1] === "Repair, inspect", "CSV import should handle commas inside quoted cells.");
   console.assert(rowsToTasks(parseCsv(buildCsv(starterTasks))).length === starterTasks.length, "CSV round trip should preserve task count.");
-  console.assert(filterTasks(starterTasks, "SDN88560", "Open").length === 1, "Search should find a matching open work order.");
-  console.assert(filterTasks(starterTasks, "", "High").length === 1, "High filter should return high-priority tasks.");
+  console.assert(filterTasks(starterTasks, "SDN88560", { completion: "Open", priority: "All", equipment: "All" }).length === 1, "Search should find a matching open work order.");
+  console.assert(filterTasks(starterTasks, "", { completion: "All", priority: "High", equipment: "All" }).length === 1, "High filter should return high-priority tasks.");
+  console.assert(filterTasks(starterTasks, "", { completion: "Open", priority: "Medium", equipment: "Shiploader 4" }).length === 1, "Stacked filters should combine completion, priority, and equipment.");
 }
 
-export default function App() {
+export default function PersonalMaintenancePWA() {
   const [tasks, setTasks] = useState(getSavedTasks);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("Open");
+  const [filters, setFilters] = useState({
+    completion: "Open",
+    priority: "All",
+    equipment: "All",
+  });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blankForm);
@@ -247,13 +257,20 @@ export default function App() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem("personal-maintenance-tasks", JSON.stringify(tasks));
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("personal-maintenance-tasks", JSON.stringify(tasks));
+      }
     } catch {
-      // App still works for the current session.
+      // If browser storage is unavailable, the app still works for the current session.
     }
   }, [tasks]);
 
-  const filteredTasks = useMemo(() => filterTasks(tasks, query, filter), [tasks, query, filter]);
+  const equipmentOptions = useMemo(() => {
+    return ["All", ...Array.from(new Set(tasks.map((task) => task.equipment))).sort()];
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => filterTasks(tasks, query, filters), [tasks, query, filters]);
+
   const openCount = tasks.filter((task) => !task.complete).length;
   const highCount = tasks.filter((task) => task.priority === "High" && !task.complete).length;
   const completeCount = tasks.filter((task) => task.complete).length;
@@ -265,7 +282,11 @@ export default function App() {
   }
 
   function toggleComplete(id) {
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, complete: !task.complete } : task));
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === id ? { ...task, complete: !task.complete } : task
+      )
+    );
   }
 
   function saveTask() {
@@ -282,9 +303,20 @@ export default function App() {
     };
 
     if (editingId !== null) {
-      setTasks((current) => current.map((task) => task.id === editingId ? { ...task, ...cleanedTask } : task));
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === editingId ? { ...task, ...cleanedTask } : task
+        )
+      );
     } else {
-      setTasks((current) => [{ id: Date.now(), ...cleanedTask, complete: false }, ...current]);
+      setTasks((current) => [
+        {
+          id: Date.now(),
+          ...cleanedTask,
+          complete: false,
+        },
+        ...current,
+      ]);
     }
 
     resetForm();
@@ -351,7 +383,7 @@ export default function App() {
 
         setTasks(importedTasks);
         setImportMessage(`Imported ${importedTasks.length} task${importedTasks.length === 1 ? "" : "s"}.`);
-        setFilter("All");
+        setFilters({ completion: "All", priority: "All", equipment: "All" });
       } catch {
         setImportMessage("Import failed. Save the worksheet as CSV and try again.");
       } finally {
@@ -362,141 +394,310 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <div className="app-container">
-        <header className="header">
-          <div className="header-row">
+    <div className="min-h-screen bg-slate-100 text-slate-950">
+      <div className="mx-auto max-w-md px-4 pb-28 pt-5">
+        <header className="mb-5">
+          <div className="mb-2 flex items-center justify-between">
             <div>
-              <p className="eyebrow">Personal PWA</p>
-              <h1>Maintenance Tracker</h1>
+              <p className="text-sm font-medium text-slate-500">Personal PWA</p>
+              <h1 className="text-3xl font-bold tracking-tight">Maintenance Tracker</h1>
             </div>
-            <div className="header-icon">
+            <div className="rounded-2xl bg-slate-950 p-3 text-white shadow-sm">
               <Icon name="wrench" size={24} />
             </div>
           </div>
-          <p className="subtext">Track equipment, work orders, status, time estimates, and completion from your phone.</p>
+          <p className="text-sm leading-5 text-slate-600">
+            Track equipment, work orders, status, time estimates, and completion from your phone.
+          </p>
         </header>
 
-        <section className="stats-grid">
-          <Card><p className="label">Open</p><p className="stat">{openCount}</p></Card>
-          <Card><p className="label">High</p><p className="stat">{highCount}</p></Card>
-          <Card><p className="label">Done</p><p className="stat">{completeCount}</p></Card>
+        <section className="mb-4 grid grid-cols-3 gap-3">
+          <Card className="rounded-2xl border-0 shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-slate-500">Open</p>
+              <p className="text-2xl font-bold">{openCount}</p>
+            </CardContent>
+          </Card>
+          <Card className="rounded-2xl border-0 shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-slate-500">High</p>
+              <p className="text-2xl font-bold">{highCount}</p>
+            </CardContent>
+          </Card>
+          <Card className="rounded-2xl border-0 shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-slate-500">Done</p>
+              <p className="text-2xl font-bold">{completeCount}</p>
+            </CardContent>
+          </Card>
         </section>
 
-        <section className="controls">
-          <div className="search-box">
-            <Icon name="search" size={18} className="muted" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search equipment, WO, status..." />
+        <section className="mb-4 space-y-3">
+          <div className="flex items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm">
+            <Icon name="search" size={18} className="text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search equipment, WO, status..."
+              className="w-full bg-transparent text-sm outline-none"
+            />
           </div>
 
-          <div className="filter-row">
-            {["Open", "High", "Medium", "Low", "Complete", "All"].map((item) => (
-              <button key={item} onClick={() => setFilter(item)} className={`pill ${filter === item ? "selected" : ""}`}>
-                {item}
-              </button>
-            ))}
+          <div className="grid grid-cols-3 gap-2">
+            <select
+              value={filters.completion}
+              onChange={(event) => setFilters({ ...filters, completion: event.target.value })}
+              className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm outline-none"
+            >
+              <option>Open</option>
+              <option>Complete</option>
+              <option>All</option>
+            </select>
+
+            <select
+              value={filters.priority}
+              onChange={(event) => setFilters({ ...filters, priority: event.target.value })}
+              className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm outline-none"
+            >
+              <option>All</option>
+              <option>High</option>
+              <option>Medium</option>
+              <option>Low</option>
+            </select>
+
+            <select
+              value={filters.equipment}
+              onChange={(event) => setFilters({ ...filters, equipment: event.target.value })}
+              className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm outline-none"
+            >
+              {equipmentOptions.map((equipment) => (
+                <option key={equipment}>{equipment}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white">
+              {filters.completion}
+            </span>
+            {filters.priority !== "All" && (
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                {filters.priority}
+              </span>
+            )}
+            {filters.equipment !== "All" && (
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                {filters.equipment}
+              </span>
+            )}
+            <button
+              onClick={() => setFilters({ completion: "Open", priority: "All", equipment: "All" })}
+              className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500 shadow-sm"
+            >
+              Reset
+            </button>
           </div>
         </section>
 
-        <section className="worksheet">
-          <Card>
-            <div className="card-title-row">
-              <Icon name="table" size={20} />
-              <div>
-                <h2>Excel Worksheet</h2>
-                <p className="small-muted">Export, edit in Excel, save as CSV, then import back.</p>
+        <section className="mb-4">
+          <Card className="rounded-3xl border-0 shadow-sm">
+            <CardContent className="space-y-3 p-4">
+              <div className="flex items-center gap-2">
+                <Icon name="table" size={20} />
+                <div>
+                  <h2 className="text-base font-bold">Excel Worksheet</h2>
+                  <p className="text-xs text-slate-500">Export, edit in Excel, save as CSV, then import back.</p>
+                </div>
               </div>
-            </div>
 
-            <div className="button-grid">
-              <Button onClick={exportTasks} variant="outline"><Icon name="download" size={16} /> Export</Button>
-              <Button onClick={exportBlankTemplate} variant="outline">Template</Button>
-              <Button onClick={() => fileInputRef.current?.click()} variant="outline"><Icon name="upload" size={16} /> Import</Button>
-            </div>
+              <div className="grid grid-cols-3 gap-2">
+                <Button onClick={exportTasks} variant="outline" className="rounded-xl text-xs">
+                  <Icon name="download" size={16} className="mr-1" /> Export
+                </Button>
+                <Button onClick={exportBlankTemplate} variant="outline" className="rounded-xl text-xs">
+                  Template
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} variant="outline" className="rounded-xl text-xs">
+                  <Icon name="upload" size={16} className="mr-1" /> Import
+                </Button>
+              </div>
 
-            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={importWorksheet} />
-            {importMessage && <p className="message">{importMessage}</p>}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={importWorksheet}
+              />
+
+              {importMessage && (
+                <p className="rounded-xl bg-slate-100 p-2 text-xs text-slate-600">{importMessage}</p>
+              )}
+            </CardContent>
           </Card>
         </section>
 
         {showForm && (
-          <Card className="form-card">
-            <div className="card-title-row">
-              <Icon name="clipboard" size={20} />
-              <h2>{editingId ? "Edit Task" : "Add Task"}</h2>
-            </div>
+          <Card className="mb-4 rounded-3xl border-0 shadow-sm">
+            <CardContent className="space-y-3 p-4">
+              <div className="flex items-center gap-2">
+                <Icon name="clipboard" size={20} />
+                <h2 className="text-lg font-bold">{editingId ? "Edit Task" : "Add Task"}</h2>
+              </div>
 
-            <input value={form.equipment} onChange={(event) => setForm({ ...form, equipment: event.target.value })} placeholder="Equipment, e.g. Stacker 47" />
-            <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Task description" />
-            <input value={form.workOrder} onChange={(event) => setForm({ ...form, workOrder: event.target.value })} placeholder="Work Order" />
+              <input
+                value={form.equipment}
+                onChange={(event) => setForm({ ...form, equipment: event.target.value })}
+                placeholder="Equipment, e.g. Stacker 47"
+                className="w-full rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+              />
+              <input
+                value={form.title}
+                onChange={(event) => setForm({ ...form, title: event.target.value })}
+                placeholder="Task description"
+                className="w-full rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+              />
+              <input
+                value={form.workOrder}
+                onChange={(event) => setForm({ ...form, workOrder: event.target.value })}
+                placeholder="Work Order"
+                className="w-full rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+              />
 
-            <div className="two-col">
-              <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
-                <option>Investigation Needed</option>
-                <option>Operating</option>
-                <option>Bypassed</option>
-                <option>In Progress</option>
-                <option>Waiting Parts</option>
-              </select>
-              <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
-              </select>
-            </div>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={form.status}
+                  onChange={(event) => setForm({ ...form, status: event.target.value })}
+                  className="rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+                >
+                  <option>Investigation Needed</option>
+                  <option>Operating</option>
+                  <option>Bypassed</option>
+                  <option>In Progress</option>
+                  <option>Waiting Parts</option>
+                </select>
+                <select
+                  value={form.priority}
+                  onChange={(event) => setForm({ ...form, priority: event.target.value })}
+                  className="rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+                >
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                </select>
+              </div>
 
-            <input value={form.estimatedTime} onChange={(event) => setForm({ ...form, estimatedTime: event.target.value })} placeholder="Estimated Time" />
-            <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Notes" rows={3} />
+              <input
+                value={form.estimatedTime}
+                onChange={(event) => setForm({ ...form, estimatedTime: event.target.value })}
+                placeholder="Estimated Time"
+                className="w-full rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+              />
 
-            <div className="two-col">
-              <Button onClick={saveTask}>Save</Button>
-              <Button onClick={resetForm} variant="outline">Cancel</Button>
-            </div>
+              <textarea
+                value={form.notes}
+                onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                placeholder="Notes"
+                rows={3}
+                className="w-full rounded-xl bg-slate-100 px-3 py-3 text-sm outline-none"
+              />
+
+              <div className="flex gap-2">
+                <Button onClick={saveTask} className="flex-1 rounded-xl">Save</Button>
+                <Button onClick={resetForm} variant="outline" className="flex-1 rounded-xl">Cancel</Button>
+              </div>
+            </CardContent>
           </Card>
         )}
 
-        <main className="task-list">
+        <main className="space-y-3">
           {filteredTasks.length === 0 && (
-            <Card className="empty">
-              <p className="empty-title">No tasks found</p>
-              <p className="small-muted">Try a different search or filter, or add a new task.</p>
+            <Card className="rounded-3xl border-0 shadow-sm">
+              <CardContent className="p-6 text-center">
+                <p className="text-base font-semibold text-slate-700">No tasks found</p>
+                <p className="mt-1 text-sm text-slate-500">Try a different search or filter, or add a new task.</p>
+              </CardContent>
             </Card>
           )}
 
           {filteredTasks.map((task) => (
-            <Card key={task.id}>
-              <div className="task-header">
-                <div>
-                  <p className="equipment">{task.equipment}</p>
-                  <h2 className={task.complete ? "complete-title" : ""}>{task.title}</h2>
+            <Card key={task.id} className="rounded-3xl border-0 shadow-sm">
+              <CardContent className="p-4">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">{task.equipment}</p>
+                    <h2 className={`text-lg font-bold leading-6 ${task.complete ? "text-slate-400 line-through" : "text-slate-950"}`}>
+                      {task.title}
+                    </h2>
+                  </div>
+                  <button onClick={() => toggleComplete(task.id)} className="mt-1" aria-label={task.complete ? "Mark task open" : "Mark task complete"}>
+                    {task.complete ? <Icon name="checkCircle" size={26} /> : <Icon name="circle" size={26} />}
+                  </button>
                 </div>
-                <button onClick={() => toggleComplete(task.id)} className="icon-button" aria-label={task.complete ? "Mark task open" : "Mark task complete"}>
-                  {task.complete ? <Icon name="checkCircle" size={26} /> : <Icon name="circle" size={26} />}
-                </button>
-              </div>
 
-              <div className="details-grid">
-                <div><p>Work Order</p><strong>{task.workOrder}</strong></div>
-                <div><p>Status</p><strong>{task.status}</strong></div>
-                <div><p>Priority</p><strong>{task.priority}</strong></div>
-                <div><p>Est. Time</p><strong>{task.estimatedTime}</strong></div>
-              </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-xl bg-slate-100 p-2">
+                    <p className="text-xs text-slate-500">Work Order</p>
+                    <p className="font-semibold">{task.workOrder}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-100 p-2">
+                    <p className="text-xs text-slate-500">Status</p>
+                    <p className="font-semibold">{task.status}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-100 p-2">
+                    <p className="text-xs text-slate-500">Priority</p>
+                    <p className="font-semibold">{task.priority}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-100 p-2">
+                    <p className="text-xs text-slate-500">Est. Time</p>
+                    <p className="font-semibold">{task.estimatedTime}</p>
+                  </div>
+                </div>
 
-              <div className="action-row">
-                <Button onClick={() => editTask(task)} variant="outline"><Icon name="pencil" size={16} /> Edit</Button>
-                <Button onClick={() => deleteTask(task.id)} variant="outline"><Icon name="trash" size={16} /> Delete</Button>
-              </div>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => editTask(task)}
+                  >
+                    <Icon name="pencil" size={16} className="mr-1" /> Edit
+                  </Button>
 
-              {task.notes && <p className="notes">{task.notes}</p>}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => deleteTask(task.id)}
+                  >
+                    <Icon name="trash" size={16} className="mr-1" /> Delete
+                  </Button>
+                </div>
+
+                {task.notes && (
+                  <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm leading-5 text-slate-600">
+                    {task.notes}
+                  </p>
+                )}
+              </CardContent>
             </Card>
           ))}
         </main>
       </div>
 
-      <div className="bottom-bar">
-        <div className="bottom-inner">
-          <Button onClick={startNewTask} className="add-button"><Icon name="plus" size={20} /> Add Task</Button>
-          <Button onClick={exportTasks} variant="outline" ariaLabel="Export tasks to CSV"><Icon name="download" size={20} /></Button>
+      <div className="fixed bottom-0 left-0 right-0 border-t bg-white/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex max-w-md gap-3">
+          <Button onClick={startNewTask} className="h-12 flex-1 rounded-2xl text-base">
+            <Icon name="plus" size={20} className="mr-2" /> Add Task
+          </Button>
+          <Button
+            variant="outline"
+            className="h-12 rounded-2xl px-4"
+            onClick={exportTasks}
+            aria-label="Export tasks to CSV"
+          >
+            <Icon name="download" size={20} />
+          </Button>
         </div>
       </div>
     </div>
